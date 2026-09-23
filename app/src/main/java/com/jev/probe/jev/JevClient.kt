@@ -26,9 +26,20 @@ class JevClient(prefs: Prefs) {
         relationship: String,
         ctx: ChatContext? = null
     ): List<RankedReply> {
-        val candidates = replyClient.draft(snapshot, relationship, ctx)
-        return judgeClient.rank(snapshot, relationship, candidates, ctx)
+        return rank(snapshot, relationship, draft(snapshot, relationship, ctx), ctx)
     }
+
+    /** 仅生成候选；调用方可在会话仍有效时再决定是否提交排序请求。 */
+    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): List<String> =
+        replyClient.draft(snapshot, relationship, ctx)
+
+    /** 仅排序已生成候选。 */
+    fun rank(
+        snapshot: ChatSnapshot,
+        relationship: String,
+        candidates: List<String>,
+        ctx: ChatContext? = null
+    ): List<RankedReply> = judgeClient.rank(snapshot, relationship, candidates, ctx)
 
     /** Judge + replies, sequential. Used by the settings connectivity test. */
     fun analyze(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): Analysis {

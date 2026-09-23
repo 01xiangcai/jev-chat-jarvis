@@ -61,6 +61,8 @@ internal class ConversationSession {
 
     fun beginAnalysis(identity: ConversationIdentity): Long? {
         if (pageState != PageState.CHAT || conversation != identity) return null
+        // 同一会话已有请求时不再叠加网络任务；切换会话会在 enter() 中清空它。
+        if (activeGeneration != null) return null
         val generation = ++nextGeneration
         activeGeneration = generation
         return generation

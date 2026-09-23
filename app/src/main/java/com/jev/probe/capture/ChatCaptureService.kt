@@ -344,50 +344,73 @@ open class ChatCaptureService : AccessibilityService() {
             } catch (e: Exception) {
                 Log.w(TAG, "context build failed: ${e.javaClass.simpleName}"); null
             }
-            main.post {
-                if (!isAnalysisCurrent(generation, identity)) return@post
+            main.post contextReady@{
+                if (!isAnalysisCurrent(generation, identity)) {
+                    Log.d(TAG, "analysis: stale before network ignored gen=$generation")
+                    return@contextReady
+                }
                 overlay?.setContextInfo(ctx?.notes?.size ?: 0, ctx?.history?.size ?: 0)
-            }
 
-            // Judgment is fast (~1s) — show it immediately.
-            submit {
-                var thrownError: String? = null
-                val judgment = try { client.judge(snapshot, rel, ctx) } catch (e: Exception) {
-                    thrownError = e.message ?: e.javaClass.simpleName
-                    null
-                }
-                main.post {
-                    if (!isAnalysisCurrent(generation, identity)) {
-                        Log.d(TAG, "analysis: stale judgment ignored gen=$generation")
-                        return@post
+                // Judgment and drafting still run in parallel, but only after the
+                // main thread confirmed this generation is still useful.
+                submit {
+                    var thrownError: String? = null
+                    val judgment = try { client.judge(snapshot, rel, ctx) } catch (e: Exception) {
+                        thrownError = e.message ?: e.javaClass.simpleName
+                        null
                     }
-                    val error = thrownError ?: judgment?.error
-                    if (error != null) {
-                        overlay?.showError(error)
-                        pendingReplies.remove(generation)
-                        judgmentReady.remove(generation)
-                        conversationSession.finishAnalysis(generation)
-                    } else {
-                        overlay?.showJudgment(requireNotNull(judgment))
-                        judgmentReady.add(generation)
-                        renderRepliesIfReady(generation, identity)
+                    main.post judgmentReady@{
+                        if (!isAnalysisCurrent(generation, identity)) {
+                            Log.d(TAG, "analysis: stale judgment ignored gen=$generation")
+                            return@judgmentReady
+                        }
+                        val error = thrownError ?: judgment?.error
+                        if (error != null) {
+                            overlay?.showError(error)
+                            pendingReplies.remove(generation)
+                            judgmentReady.remove(generation)
+                            conversationSession.finishAnalysis(generation)
+                        } else {
+                            overlay?.showJudgment(requireNotNull(judgment))
+                            judgmentReady.add(generation)
+                            renderRepliesIfReady(generation, identity)
+                        }
                     }
                 }
-            }
-            // Candidate replies are slower (generative + rank) — fill in when ready.
-            submit {
-                var replyError: String? = null
-                val ranked = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
-                    replyError = e.message ?: e.javaClass.simpleName
-                    emptyList()
-                }
-                main.post {
-                    if (!isAnalysisCurrent(generation, identity)) {
-                        Log.d(TAG, "analysis: stale replies ignored gen=$generation")
-                        return@post
+
+                submit {
+                    var draftError: String? = null
+                    val candidates = try { client.draft(snapshot, rel, ctx) } catch (e: Exception) {
+                        draftError = e.message ?: e.javaClass.simpleName
+                        emptyList()
                     }
-                    pendingReplies[generation] = ReplyResult(ranked, replyError)
-                    renderRepliesIfReady(generation, identity)
+                    main.post draftReady@{
+                        if (!isAnalysisCurrent(generation, identity)) {
+                            Log.d(TAG, "analysis: stale draft ignored gen=$generation")
+                            return@draftReady
+                        }
+                        if (draftError != null) {
+                            pendingReplies[generation] = ReplyResult(emptyList(), draftError)
+                            renderRepliesIfReady(generation, identity)
+                            return@draftReady
+                        }
+                        // 仅在候选生成后仍属于当前会话时才发送第二次 Laya 排序请求。
+                        submit {
+                            var rankError: String? = null
+                            val ranked = try { client.rank(snapshot, rel, candidates, ctx) } catch (e: Exception) {
+                                rankError = e.message ?: e.javaClass.simpleName
+                                emptyList()
+                            }
+                            main.post rankReady@{
+                                if (!isAnalysisCurrent(generation, identity)) {
+                                    Log.d(TAG, "analysis: stale rank ignored gen=$generation")
+                                    return@rankReady
+                                }
+                                pendingReplies[generation] = ReplyResult(ranked, rankError)
+                                renderRepliesIfReady(generation, identity)
+                            }
+                        }
+                    }
                 }
             }
         }

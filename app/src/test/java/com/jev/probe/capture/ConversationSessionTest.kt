@@ -77,6 +77,16 @@ class ConversationSessionTest {
     }
 
     @Test
+    fun `同一会话不重复启动分析`() {
+        val session = ConversationSession()
+        val chatA = conversation("A")
+        session.enter(chatA)
+
+        assertTrue(session.beginAnalysis(chatA) != null)
+        assertTrue(session.beginAnalysis(chatA) == null)
+    }
+
+    @Test
     fun `未知 App 仍保留手动 OCR 气泡`() {
         assertTrue(shouldShowManualOcrBubble(hasAdapter = false, hideForSurface = false))
         assertFalse(shouldShowManualOcrBubble(hasAdapter = true, hideForSurface = false))
