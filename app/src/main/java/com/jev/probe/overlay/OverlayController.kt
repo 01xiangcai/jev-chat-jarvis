@@ -313,6 +313,12 @@ class OverlayController(private val ctx: Context) {
         contentBox?.removeAllViews()
     }
 
+    /** 当前会话结束时统一清理面板和填入回调，避免旧结果残留到列表或新会话。 */
+    fun clearAndHide() {
+        resetForNewConversation()
+        hide()
+    }
+
     private fun bigButton(label: String, onClick: () -> Unit) = TextView(ctx).apply {
         text = label; textSize = 14f; gravity = Gravity.CENTER
         setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
